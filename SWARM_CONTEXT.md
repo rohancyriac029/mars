@@ -303,9 +303,9 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             set_gazebo_model_path,
+            declare_tb3_model,
             set_tb3_model,
             declare_world,
-            declare_tb3_model,
             declare_map,
             declare_params_file,
             declare_rviz_config,
