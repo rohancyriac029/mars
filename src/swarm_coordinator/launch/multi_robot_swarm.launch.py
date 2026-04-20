@@ -4,10 +4,10 @@ from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
-    ExecuteProcess,
     GroupAction,
     IncludeLaunchDescription,
     LogInfo,
+    SetEnvironmentVariable,
     TimerAction,
 )
 from launch.conditions import IfCondition
@@ -26,7 +26,22 @@ def generate_launch_description() -> LaunchDescription:
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
     # nav2_params.yaml avoids BT plugins that may be missing in some Humble installs.
     default_params = os.path.join(nav2_dir, 'params', 'nav2_params.yaml')
-    default_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
+    namespaced_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
+    default_rviz = (
+        namespaced_rviz
+        if os.path.exists(namespaced_rviz)
+        else os.path.join(nav2_dir, 'rviz', 'nav2_default_view.rviz')
+    )
+
+    gazebo_model_path = os.path.join(tb3_gazebo_dir, 'models')
+    existing_model_path = os.environ.get('GAZEBO_MODEL_PATH', '')
+    if existing_model_path:
+        gazebo_model_path = f'{gazebo_model_path}:{existing_model_path}'
+
+    set_gazebo_model_path = SetEnvironmentVariable(
+        'GAZEBO_MODEL_PATH', gazebo_model_path
+    )
+    set_tb3_model = SetEnvironmentVariable('TURTLEBOT3_MODEL', LaunchConfiguration('tb3_model'))
 
     robots = [
         {'name': 'robot1', 'x': 0.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
@@ -37,6 +52,11 @@ def generate_launch_description() -> LaunchDescription:
 
     declare_world = DeclareLaunchArgument(
         'world', default_value=default_world, description='Gazebo world file'
+    )
+    declare_tb3_model = DeclareLaunchArgument(
+        'tb3_model',
+        default_value=os.environ.get('TURTLEBOT3_MODEL', 'waffle'),
+        description='TurtleBot3 model used by simulation assets',
     )
     declare_map = DeclareLaunchArgument('map', default_value=default_map, description='Nav2 map yaml')
     declare_params_file = DeclareLaunchArgument(
@@ -59,54 +79,56 @@ def generate_launch_description() -> LaunchDescription:
         description='If true, followers keep updating from leader odometry',
     )
 
-    start_gzserver = ExecuteProcess(
-        cmd=[
-            'gzserver',
-            '-s',
-            'libgazebo_ros_init.so',
-            '-s',
-            'libgazebo_ros_factory.so',
-            LaunchConfiguration('world'),
-        ],
-        output='screen',
-    )
-
-    start_gzclient = ExecuteProcess(
-        cmd=['gzclient'],
-        output='screen',
-    )
-
     robot_actions = [LogInfo(msg=['number_of_robots=', str(len(robots))])]
-    for robot in robots:
+    for idx, robot in enumerate(robots):
+        use_simulator = 'True' if idx == 0 else 'False'
+        headless = 'False' if idx == 0 else 'True'
+        start_delay = float(idx * 3)
+
         robot_actions.append(
-            GroupAction(
-                [
-                    LogInfo(msg=['Launching namespace=', robot['name'], ' init_pose=', str(robot)]),
-                    IncludeLaunchDescription(
-                        PythonLaunchDescriptionSource(
-                            os.path.join(launch_dir, 'tb3_simulation_launch.py')
-                        ),
-                        launch_arguments={
-                            'namespace': TextSubstitution(text=robot['name']),
-                            'use_namespace': 'True',
-                            'map': LaunchConfiguration('map'),
-                            'use_sim_time': 'True',
-                            'params_file': LaunchConfiguration('params_file'),
-                            'autostart': LaunchConfiguration('autostart'),
-                            'use_rviz': 'False',
-                            'use_simulator': 'False',
-                            'headless': 'False',
-                            'use_robot_state_pub': 'True',
-                            'x_pose': TextSubstitution(text=str(robot['x'])),
-                            'y_pose': TextSubstitution(text=str(robot['y'])),
-                            'z_pose': TextSubstitution(text=str(robot['z'])),
-                            'roll': TextSubstitution(text=str(robot['roll'])),
-                            'pitch': TextSubstitution(text=str(robot['pitch'])),
-                            'yaw': TextSubstitution(text=str(robot['yaw'])),
-                            'robot_name': TextSubstitution(text=robot['name']),
-                        }.items(),
-                    ),
-                ]
+            TimerAction(
+                period=start_delay,
+                actions=[
+                    GroupAction(
+                        [
+                            LogInfo(
+                                msg=[
+                                    'Launching namespace=',
+                                    robot['name'],
+                                    ' init_pose=',
+                                    str(robot),
+                                    ' use_simulator=',
+                                    use_simulator,
+                                ]
+                            ),
+                            IncludeLaunchDescription(
+                                PythonLaunchDescriptionSource(
+                                    os.path.join(launch_dir, 'tb3_simulation_launch.py')
+                                ),
+                                launch_arguments={
+                                    'namespace': TextSubstitution(text=robot['name']),
+                                    'use_namespace': 'True',
+                                    'map': LaunchConfiguration('map'),
+                                    'use_sim_time': 'True',
+                                    'params_file': LaunchConfiguration('params_file'),
+                                    'autostart': LaunchConfiguration('autostart'),
+                                    'use_rviz': 'False',
+                                    'use_simulator': use_simulator,
+                                    'headless': headless,
+                                    'world': LaunchConfiguration('world'),
+                                    'use_robot_state_pub': 'True',
+                                    'x_pose': TextSubstitution(text=str(robot['x'])),
+                                    'y_pose': TextSubstitution(text=str(robot['y'])),
+                                    'z_pose': TextSubstitution(text=str(robot['z'])),
+                                    'roll': TextSubstitution(text=str(robot['roll'])),
+                                    'pitch': TextSubstitution(text=str(robot['pitch'])),
+                                    'yaw': TextSubstitution(text=str(robot['yaw'])),
+                                    'robot_name': TextSubstitution(text=robot['name']),
+                                }.items(),
+                            ),
+                        ]
+                    )
+                ],
             )
         )
 
@@ -120,10 +142,10 @@ def generate_launch_description() -> LaunchDescription:
         }.items(),
     )
 
-    delayed_robot_bringup = TimerAction(period=5.0, actions=robot_actions)
+    delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
     coordinator = TimerAction(
-        period=25.0,
+        period=55.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -148,15 +170,16 @@ def generate_launch_description() -> LaunchDescription:
 
     return LaunchDescription(
         [
+            set_gazebo_model_path,
+            set_tb3_model,
             declare_world,
+            declare_tb3_model,
             declare_map,
             declare_params_file,
             declare_rviz_config,
             declare_use_rviz,
             declare_autostart,
             declare_dynamic_follow,
-            start_gzserver,
-            start_gzclient,
             delayed_robot_bringup,
             single_rviz,
             coordinator,
