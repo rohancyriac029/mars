@@ -38,7 +38,7 @@ mars/
       swarm_coordinator/
         __init__.py
         goal_coordinator.py
-                pose_initializer.py
+        pose_initializer.py
       resource/
         swarm_coordinator
       package.xml
@@ -178,10 +178,10 @@ def generate_launch_description() -> LaunchDescription:
     set_tb3_model = SetEnvironmentVariable('TURTLEBOT3_MODEL', LaunchConfiguration('tb3_model'))
 
     robots = [
-        {'name': 'robot1', 'x': 0.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot2', 'x': -1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot3', 'x': 1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot4', 'x': 0.0, 'y': -1.5, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot1', 'x': -2.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot2', 'x': -2.0, 'y': -1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot3', 'x': -2.0, 'y': 1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot4', 'x': -1.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
     ]
 
     declare_world = DeclareLaunchArgument(
@@ -279,7 +279,7 @@ def generate_launch_description() -> LaunchDescription:
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
     pose_init = TimerAction(
-        period=20.0,
+        period=35.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -291,7 +291,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     coordinator = TimerAction(
-        period=90.0,
+        period=120.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -302,7 +302,7 @@ def generate_launch_description() -> LaunchDescription:
                     {
                         'leader_ns': 'robot1',
                         'follower_ns': ['robot2', 'robot3', 'robot4'],
-                        'leader_goal': [1.0, 0.0, 0.0],
+                        'leader_goal': [1.5, 0.0, 0.0],
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
@@ -358,7 +358,7 @@ class GoalCoordinator(Node):
         self.follower_ns = list(
             self.declare_parameter('follower_ns', ['robot2', 'robot3', 'robot4']).value
         )
-        self.leader_goal = list(self.declare_parameter('leader_goal', [1.0, 0.0, 0.0]).value)
+        self.leader_goal = list(self.declare_parameter('leader_goal', [1.5, 0.0, 0.0]).value)
         raw_dynamic_follow = self.declare_parameter('dynamic_follow', False).value
         if isinstance(raw_dynamic_follow, str):
             self.dynamic_follow = raw_dynamic_follow.lower() in ('1', 'true', 'yes', 'on')
@@ -375,17 +375,17 @@ class GoalCoordinator(Node):
 
         # Fixed offsets around the leader in map coordinates.
         self.offsets: Dict[str, Tuple[float, float]] = {
-            'robot2': (-1.0, 0.5),
-            'robot3': (-1.0, -0.5),
-            'robot4': (-2.0, 0.0),
+            'robot2': (0.0, -1.0),
+            'robot3': (0.0, 1.0),
+            'robot4': (-1.0, 0.0),
         }
 
         # Must match the spawn poses defined in the launch file.
         self.spawn_poses: Dict[str, Tuple[float, float, float]] = {
-            'robot1': (0.0, 0.0, 0.0),
-            'robot2': (-1.5, 0.0, 0.0),
-            'robot3': (1.5, 0.0, 0.0),
-            'robot4': (0.0, -1.5, 0.0),
+            'robot1': (-2.0, 0.0, 0.0),
+            'robot2': (-2.0, -1.0, 0.0),
+            'robot3': (-2.0, 1.0, 0.0),
+            'robot4': (-1.0, 0.0, 0.0),
         }
 
         self.robot_names = [self.leader_ns] + self.follower_ns
@@ -596,10 +596,10 @@ class PoseInitializer(Node):
         super().__init__('pose_initializer')
 
         self.spawn_poses = {
-            'robot1': (0.0, 0.0, 0.0),
-            'robot2': (-1.5, 0.0, 0.0),
-            'robot3': (1.5, 0.0, 0.0),
-            'robot4': (0.0, -1.5, 0.0),
+            'robot1': (-2.0, 0.0, 0.0),
+            'robot2': (-2.0, -1.0, 0.0),
+            'robot3': (-2.0, 1.0, 0.0),
+            'robot4': (-1.0, 0.0, 0.0),
         }
 
         self.publishers = {}
@@ -687,7 +687,7 @@ ros2 launch swarm_coordinator multi_robot_swarm.launch.py dynamic_follow:=True
 Important: all args must be part of the same command.
 ```bash
 ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
-robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
+robots:="robot1={x: -2.0, y: 0.0, yaw: 0.0}; robot2={x: -2.0, y: -1.0, yaw: 0.0}; robot3={x: -2.0, y: 1.0, yaw: 0.0}; robot4={x: -1.0, y: 0.0, yaw: 0.0}" \
 world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
 map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
 use_rviz:=False autostart:=True \
@@ -784,7 +784,7 @@ Root cause:
 
 Fixes applied:
 - Added dedicated `pose_initializer` node.
-- Launched `pose_initializer` early at `20s` after robot bringup begins.
+- Launched `pose_initializer` early at `35s` after robot bringup begins.
 - Set coordinator parameter `send_initial_pose` to `False` so only early pose init handles AMCL seeding.
 
 ---
@@ -839,9 +839,9 @@ These updates were applied to improve full UI behavior on Ubuntu desktop (Gazebo
 2. Added RViz config fallback:
      - prefer `nav2_namespaced_view.rviz`
      - fallback to `nav2_default_view.rviz` if missing
-3. Increased coordinator delayed start from `35.0` to `90.0` seconds for slower machines.
+3. Increased coordinator delayed start from `35.0` to `120.0` seconds for slower machines.
 4. Kept one RViz instance and staggered robot startup.
-5. Added early `pose_initializer` launch at `20s` and set coordinator `send_initial_pose=False`.
+5. Added early `pose_initializer` launch at `35s` and set coordinator `send_initial_pose=False`.
 
 ### Critical CLI pitfall (causes `number_of_robots=0`)
 
@@ -856,7 +856,7 @@ robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; ..."
 Correct:
 ```bash
 ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
-    robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
+    robots:="robot1={x: -2.0, y: 0.0, yaw: 0.0}; robot2={x: -2.0, y: -1.0, yaw: 0.0}; robot3={x: -2.0, y: 1.0, yaw: 0.0}; robot4={x: -1.0, y: 0.0, yaw: 0.0}" \
     world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
     map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
     use_rviz:=False autostart:=True \
@@ -943,7 +943,7 @@ export TURTLEBOT3_MODEL=waffle
 export GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:$GAZEBO_MODEL_PATH
 
 ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
-    robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
+    robots:="robot1={x: -2.0, y: 0.0, yaw: 0.0}; robot2={x: -2.0, y: -1.0, yaw: 0.0}; robot3={x: -2.0, y: 1.0, yaw: 0.0}; robot4={x: -1.0, y: 0.0, yaw: 0.0}" \
     world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
     map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
     use_rviz:=False \

@@ -20,12 +20,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description() -> LaunchDescription:
     nav2_dir = get_package_share_directory('nav2_bringup')
     tb3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
+    swarm_dir = get_package_share_directory('swarm_coordinator')
 
     launch_dir = os.path.join(nav2_dir, 'launch')
     default_world = os.path.join(tb3_gazebo_dir, 'worlds', 'turtlebot3_world.world')
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
-    # nav2_params.yaml avoids BT plugins that may be missing in some Humble installs.
-    default_params = os.path.join(nav2_dir, 'params', 'nav2_params.yaml')
     namespaced_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
     default_rviz = (
         namespaced_rviz
@@ -44,10 +43,46 @@ def generate_launch_description() -> LaunchDescription:
     set_tb3_model = SetEnvironmentVariable('TURTLEBOT3_MODEL', LaunchConfiguration('tb3_model'))
 
     robots = [
-        {'name': 'robot1', 'x': -2.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot2', 'x': -2.0, 'y': -1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot3', 'x': -2.0, 'y': 1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot4', 'x': -1.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {
+            'name': 'robot1',
+            'x': -2.0,
+            'y': 0.0,
+            'z': 0.01,
+            'roll': 0.0,
+            'pitch': 0.0,
+            'yaw': 0.0,
+            'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot1.yaml'),
+        },
+        {
+            'name': 'robot2',
+            'x': -2.0,
+            'y': -1.0,
+            'z': 0.01,
+            'roll': 0.0,
+            'pitch': 0.0,
+            'yaw': 0.0,
+            'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot2.yaml'),
+        },
+        {
+            'name': 'robot3',
+            'x': -2.0,
+            'y': 1.0,
+            'z': 0.01,
+            'roll': 0.0,
+            'pitch': 0.0,
+            'yaw': 0.0,
+            'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot3.yaml'),
+        },
+        {
+            'name': 'robot4',
+            'x': -1.0,
+            'y': -1.5,
+            'z': 0.01,
+            'roll': 0.0,
+            'pitch': 0.0,
+            'yaw': 0.0,
+            'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot4.yaml'),
+        },
     ]
 
     declare_world = DeclareLaunchArgument(
@@ -59,11 +94,6 @@ def generate_launch_description() -> LaunchDescription:
         description='TurtleBot3 model used by simulation assets',
     )
     declare_map = DeclareLaunchArgument('map', default_value=default_map, description='Nav2 map yaml')
-    declare_params_file = DeclareLaunchArgument(
-        'params_file',
-        default_value=default_params,
-        description='Nav2 shared multirobot params yaml',
-    )
     declare_rviz_config = DeclareLaunchArgument(
         'rviz_config', default_value=default_rviz, description='RViz config file'
     )
@@ -110,7 +140,7 @@ def generate_launch_description() -> LaunchDescription:
                                     'use_namespace': 'True',
                                     'map': LaunchConfiguration('map'),
                                     'use_sim_time': 'True',
-                                    'params_file': LaunchConfiguration('params_file'),
+                                    'params_file': TextSubstitution(text=robot['params']),
                                     'autostart': LaunchConfiguration('autostart'),
                                     'use_rviz': 'False',
                                     'use_simulator': use_simulator,
@@ -144,18 +174,6 @@ def generate_launch_description() -> LaunchDescription:
 
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
-    pose_init = TimerAction(
-        period=35.0,
-        actions=[
-            Node(
-                package='swarm_coordinator',
-                executable='pose_initializer',
-                name='pose_initializer',
-                output='screen',
-            )
-        ],
-    )
-
     coordinator = TimerAction(
         period=120.0,
         actions=[
@@ -187,14 +205,12 @@ def generate_launch_description() -> LaunchDescription:
             set_tb3_model,
             declare_world,
             declare_map,
-            declare_params_file,
             declare_rviz_config,
             declare_use_rviz,
             declare_autostart,
             declare_dynamic_follow,
             delayed_robot_bringup,
             single_rviz,
-            pose_init,
             coordinator,
         ]
     )

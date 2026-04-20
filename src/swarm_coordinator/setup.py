@@ -10,6 +10,15 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/multi_robot_swarm.launch.py']),
+        (
+            'share/' + package_name + '/config',
+            [
+                'config/nav2_params_robot1.yaml',
+                'config/nav2_params_robot2.yaml',
+                'config/nav2_params_robot3.yaml',
+                'config/nav2_params_robot4.yaml',
+            ],
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
