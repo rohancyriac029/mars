@@ -158,7 +158,12 @@ def generate_launch_description() -> LaunchDescription:
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
     # nav2_params.yaml avoids BT plugins that may be missing in some Humble installs.
     default_params = os.path.join(nav2_dir, 'params', 'nav2_params.yaml')
-    default_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
+    namespaced_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
+    default_rviz = (
+        namespaced_rviz
+        if os.path.exists(namespaced_rviz)
+        else os.path.join(nav2_dir, 'rviz', 'nav2_default_view.rviz')
+    )
 
     gazebo_model_path = os.path.join(tb3_gazebo_dir, 'models')
     existing_model_path = os.environ.get('GAZEBO_MODEL_PATH', '')
@@ -168,16 +173,22 @@ def generate_launch_description() -> LaunchDescription:
     set_gazebo_model_path = SetEnvironmentVariable(
         'GAZEBO_MODEL_PATH', gazebo_model_path
     )
+    set_tb3_model = SetEnvironmentVariable('TURTLEBOT3_MODEL', LaunchConfiguration('tb3_model'))
 
     robots = [
         {'name': 'robot1', 'x': 0.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot2', 'x': 0.0, 'y': -1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot3', 'x': 0.0, 'y': 1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot4', 'x': -1.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot2', 'x': -1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot3', 'x': 1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot4', 'x': 0.0, 'y': -1.5, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
     ]
 
     declare_world = DeclareLaunchArgument(
         'world', default_value=default_world, description='Gazebo world file'
+    )
+    declare_tb3_model = DeclareLaunchArgument(
+        'tb3_model',
+        default_value=os.environ.get('TURTLEBOT3_MODEL', 'waffle'),
+        description='TurtleBot3 model used by simulation assets',
     )
     declare_map = DeclareLaunchArgument('map', default_value=default_map, description='Nav2 map yaml')
     declare_params_file = DeclareLaunchArgument(
@@ -204,7 +215,7 @@ def generate_launch_description() -> LaunchDescription:
     for idx, robot in enumerate(robots):
         use_simulator = 'True' if idx == 0 else 'False'
         headless = 'False' if idx == 0 else 'True'
-        start_delay = float(idx * 3)
+        start_delay = float(idx * 8)
 
         robot_actions.append(
             TimerAction(
@@ -266,7 +277,7 @@ def generate_launch_description() -> LaunchDescription:
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
     coordinator = TimerAction(
-        period=35.0,
+        period=90.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -277,7 +288,7 @@ def generate_launch_description() -> LaunchDescription:
                     {
                         'leader_ns': 'robot1',
                         'follower_ns': ['robot2', 'robot3', 'robot4'],
-                        'leader_goal': [2.0, 2.0, 0.0],
+                        'leader_goal': [1.0, 0.0, 0.0],
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
@@ -292,7 +303,9 @@ def generate_launch_description() -> LaunchDescription:
     return LaunchDescription(
         [
             set_gazebo_model_path,
+            set_tb3_model,
             declare_world,
+            declare_tb3_model,
             declare_map,
             declare_params_file,
             declare_rviz_config,
@@ -330,7 +343,7 @@ class GoalCoordinator(Node):
         self.follower_ns = list(
             self.declare_parameter('follower_ns', ['robot2', 'robot3', 'robot4']).value
         )
-        self.leader_goal = list(self.declare_parameter('leader_goal', [2.0, 2.0, 0.0]).value)
+        self.leader_goal = list(self.declare_parameter('leader_goal', [1.0, 0.0, 0.0]).value)
         raw_dynamic_follow = self.declare_parameter('dynamic_follow', False).value
         if isinstance(raw_dynamic_follow, str):
             self.dynamic_follow = raw_dynamic_follow.lower() in ('1', 'true', 'yes', 'on')
@@ -347,17 +360,17 @@ class GoalCoordinator(Node):
 
         # Fixed offsets around the leader in map coordinates.
         self.offsets: Dict[str, Tuple[float, float]] = {
-            'robot2': (0.0, -1.0),
-            'robot3': (0.0, 1.0),
-            'robot4': (-1.0, 0.0),
+            'robot2': (-1.0, 0.5),
+            'robot3': (-1.0, -0.5),
+            'robot4': (-2.0, 0.0),
         }
 
         # Must match the spawn poses defined in the launch file.
         self.spawn_poses: Dict[str, Tuple[float, float, float]] = {
             'robot1': (0.0, 0.0, 0.0),
-            'robot2': (0.0, -1.0, 0.0),
-            'robot3': (0.0, 1.0, 0.0),
-            'robot4': (-1.0, 0.0, 0.0),
+            'robot2': (-1.5, 0.0, 0.0),
+            'robot3': (1.5, 0.0, 0.0),
+            'robot4': (0.0, -1.5, 0.0),
         }
 
         self.robot_names = [self.leader_ns] + self.follower_ns
@@ -580,7 +593,7 @@ ros2 launch swarm_coordinator multi_robot_swarm.launch.py dynamic_follow:=True
 Important: all args must be part of the same command.
 ```bash
 ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
-robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: 0.0, y: -1.0, yaw: 0.0}; robot3={x: 0.0, y: 1.0, yaw: 0.0}; robot4={x: -1.0, y: 0.0, yaw: 0.0}" \
+robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
 world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
 map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
 use_rviz:=False autostart:=True \
@@ -712,7 +725,7 @@ These updates were applied to improve full UI behavior on Ubuntu desktop (Gazebo
 2. Added RViz config fallback:
      - prefer `nav2_namespaced_view.rviz`
      - fallback to `nav2_default_view.rviz` if missing
-3. Increased coordinator delayed start from `35.0` to `55.0` seconds for slower machines.
+3. Increased coordinator delayed start from `35.0` to `90.0` seconds for slower machines.
 4. Kept one RViz instance and staggered robot startup.
 
 ### Critical CLI pitfall (causes `number_of_robots=0`)
@@ -728,7 +741,7 @@ robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; ..."
 Correct:
 ```bash
 ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
-    robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: 0.0, y: -1.0, yaw: 0.0}; robot3={x: 0.0, y: 1.0, yaw: 0.0}; robot4={x: -1.0, y: 0.0, yaw: 0.0}" \
+    robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
     world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
     map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
     use_rviz:=False autostart:=True \
@@ -755,3 +768,94 @@ ros2 topic echo /gazebo/model_states --once
 If this markdown and code ever differ, use workspace code as source of truth:
 - `src/swarm_coordinator/launch/multi_robot_swarm.launch.py`
 - `src/swarm_coordinator/swarm_coordinator/goal_coordinator.py`
+
+---
+
+## 10) Gazebo Transport Crash (Stale Master) - Latest Root Cause
+
+### Symptom pattern
+
+Observed in logs:
+- Gazebo exits early with transport/master errors (for example exit code `255`, unable to initialize transport, unable to read from master).
+- Then no robots are spawned.
+- Then Nav2 loops on TF timeout:
+    - `Timed out waiting for transform from base_link to odom`.
+
+### Why this causes all downstream failures
+
+If Gazebo dies before robot spawn:
+1. No `/spawn_entity` success
+2. No robot odometry topics (`/robotX/odom`)
+3. No `odom` TF for each robot
+4. Local/global costmaps cannot transform frames
+5. Navigation appears frozen and goals are rejected or never executed
+
+### Confirm stale master/port conflict
+
+```bash
+ss -tlnp | grep 11345
+```
+
+If anything is still bound to `11345` after shutdown, Gazebo relaunch can fail.
+
+### Full cleanup before relaunch
+
+```bash
+# Kill lingering simulator + ROS launch processes
+pkill -9 -f gzserver || true
+pkill -9 -f gzclient || true
+pkill -9 -f gazebo || true
+pkill -9 -f "ros2 launch" || true
+pkill -9 -f "ros2 run" || true
+
+# Give OS time to release resources
+sleep 5
+
+# Verify Gazebo master port is free (expect no output)
+ss -tlnp | grep 11345
+
+# Clear Gazebo shared-memory artifacts (best effort)
+rm -f /tmp/gzmaster* /tmp/.gazebo* 2>/dev/null || true
+```
+
+### Relaunch (single command with continuations)
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/gogo/mars/install/setup.bash
+export TURTLEBOT3_MODEL=waffle
+export GAZEBO_MODEL_PATH=/opt/ros/humble/share/turtlebot3_gazebo/models:$GAZEBO_MODEL_PATH
+
+ros2 launch nav2_bringup cloned_multi_tb3_simulation_launch.py \
+    robots:="robot1={x: 0.0, y: 0.0, yaw: 0.0}; robot2={x: -1.5, y: 0.0, yaw: 0.0}; robot3={x: 1.5, y: 0.0, yaw: 0.0}; robot4={x: 0.0, y: -1.5, yaw: 0.0}" \
+    world:=/opt/ros/humble/share/turtlebot3_gazebo/worlds/turtlebot3_world.world \
+    map:=/opt/ros/humble/share/nav2_bringup/maps/turtlebot3_world.yaml \
+    use_rviz:=False \
+    autostart:=True \
+    params_file:=/opt/ros/humble/share/nav2_bringup/params/nav2_params.yaml
+```
+
+### Healthy startup indicators
+
+Look for lines like:
+- `Connected to gazebo master @ http://127.0.0.1:11345`
+- `Publicized address: ...`
+
+Then verify robots actually exist:
+
+```bash
+ros2 topic list | grep -E "model_states|robot[1-4]/odom"
+ros2 topic echo /model_states --once
+ros2 topic echo /robot1/odom --once
+```
+
+Only start coordinator after odom/action servers are visible.
+
+### Wayland/X11 compatibility note
+
+If Gazebo GUI still fails under Wayland sessions, force X11 backend:
+
+```bash
+export QT_QPA_PLATFORM=xcb
+export DISPLAY=:0   # or :1 depending on active session
+```
