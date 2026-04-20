@@ -52,6 +52,12 @@ class GoalCoordinator(Node):
         self.follower_goal_margin = float(
             self.declare_parameter('follower_goal_margin', 0.25).value
         )
+        self.follower_failure_relax_step = float(
+            self.declare_parameter('follower_failure_relax_step', 0.40).value
+        )
+        self.follower_max_retries = int(
+            self.declare_parameter('follower_max_retries', 3).value
+        )
         self.send_initial_pose = bool(self.declare_parameter('send_initial_pose', True).value)
         self.initial_pose_republish_count = int(
             self.declare_parameter('initial_pose_republish_count', 30).value
@@ -73,6 +79,9 @@ class GoalCoordinator(Node):
         self.robot_names = [self.leader_ns] + self.follower_ns
         self.nav_action_clients: Dict[str, ActionClient] = {}
         self.initial_pose_publishers = {}
+        self.latest_commanded_goal: Dict[str, Tuple[float, float, float]] = {}
+        self.active_formation_goal: Optional[Tuple[float, float, float]] = None
+        self.follower_retry_count: Dict[str, int] = {}
 
         for ns in self.robot_names:
             self.nav_action_clients[ns] = ActionClient(self, NavigateToPose, f'/{ns}/navigate_to_pose')
@@ -153,6 +162,7 @@ class GoalCoordinator(Node):
         lx, ly, lyaw = self.leader_goal
 
         include_leader = not self.skip_bootstrap_leader_send
+        self._begin_formation_cycle(lx, ly, lyaw)
         self._send_formation_goal(lx, ly, lyaw, include_leader=include_leader)
 
     def _leader_goal_cb(self, msg: PoseStamped) -> None:
@@ -204,7 +214,12 @@ class GoalCoordinator(Node):
         self.get_logger().info(
             f'New leader goal from {source} -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
         )
+        self._begin_formation_cycle(lx, ly, lyaw)
         self._send_formation_goal(lx, ly, lyaw, include_leader=include_leader)
+
+    def _begin_formation_cycle(self, lx: float, ly: float, lyaw: float) -> None:
+        self.active_formation_goal = (lx, ly, lyaw)
+        self.follower_retry_count = {ns: 0 for ns in self.follower_ns}
 
     def _send_formation_goal(
         self, lx: float, ly: float, lyaw: float, include_leader: bool
@@ -265,6 +280,9 @@ class GoalCoordinator(Node):
         return bx, by
 
     def _send_nav_goal(self, robot_ns: str, x: float, y: float, yaw: float) -> None:
+        commanded_goal = (x, y, yaw)
+        self.latest_commanded_goal[robot_ns] = commanded_goal
+
         goal = NavigateToPose.Goal()
         goal.pose = PoseStamped()
         goal.pose.header.frame_id = 'map'
@@ -276,9 +294,11 @@ class GoalCoordinator(Node):
         goal.pose.pose.orientation = self._quat_from_yaw(yaw)
 
         future = self.nav_action_clients[robot_ns].send_goal_async(goal)
-        future.add_done_callback(lambda f, ns=robot_ns: self._goal_response_cb(ns, f))
+        future.add_done_callback(
+            lambda f, ns=robot_ns, cg=commanded_goal: self._goal_response_cb(ns, cg, f)
+        )
 
-    def _goal_response_cb(self, robot_ns: str, future) -> None:
+    def _goal_response_cb(self, robot_ns: str, commanded_goal: Tuple[float, float, float], future) -> None:
         try:
             goal_handle = future.result()
         except Exception as exc:
@@ -290,14 +310,51 @@ class GoalCoordinator(Node):
             return
 
         result_future = goal_handle.get_result_async()
-        result_future.add_done_callback(lambda f, ns=robot_ns: self._goal_result_cb(ns, f))
+        result_future.add_done_callback(
+            lambda f, ns=robot_ns, cg=commanded_goal: self._goal_result_cb(ns, cg, f)
+        )
 
-    def _goal_result_cb(self, robot_ns: str, future) -> None:
+    def _goal_result_cb(self, robot_ns: str, commanded_goal: Tuple[float, float, float], future) -> None:
+        latest = self.latest_commanded_goal.get(robot_ns)
+        if latest is not None and not self._same_goal(latest, commanded_goal):
+            return
+
         try:
             status = future.result().status
             self.get_logger().info(f'/{robot_ns} goal finished with status={status}')
+
+            # If follower planning fails, progressively relax its offset toward the leader goal.
+            if status != 4 and robot_ns in self.follower_ns and not self.dynamic_follow:
+                self._retry_follower_goal(robot_ns)
         except Exception as exc:
             self.get_logger().error(f'Error while getting result from /{robot_ns}: {exc}')
+
+    def _retry_follower_goal(self, robot_ns: str) -> None:
+        if self.active_formation_goal is None:
+            return
+
+        retries = self.follower_retry_count.get(robot_ns, 0)
+        if retries >= self.follower_max_retries:
+            self.get_logger().warning(
+                f'/{robot_ns} reached max retries ({self.follower_max_retries}); keeping last command.'
+            )
+            return
+
+        self.follower_retry_count[robot_ns] = retries + 1
+
+        lx, ly, lyaw = self.active_formation_goal
+        base_dx, base_dy = self.offsets.get(robot_ns, (0.0, 0.0))
+        scale = max(0.0, 1.0 - self.follower_failure_relax_step * (retries + 1))
+        retry_dx = base_dx * scale
+        retry_dy = base_dy * scale
+
+        gx, gy = self._bounded_follower_goal(lx + retry_dx, ly + retry_dy)
+        self.get_logger().warning(
+            f'Retrying /{robot_ns} with relaxed goal '
+            f'({retries + 1}/{self.follower_max_retries}) -> ({gx:.2f}, {gy:.2f}, yaw={lyaw:.2f})'
+        )
+        self._send_nav_goal(robot_ns, gx, gy, lyaw)
+        self.last_follower_goals[robot_ns] = (gx, gy, lyaw)
 
     def _publish_initial_pose(self, robot_ns: str, x: float, y: float, yaw: float) -> None:
         msg = PoseWithCovarianceStamped()
@@ -333,6 +390,14 @@ class GoalCoordinator(Node):
     @staticmethod
     def _pose_delta(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> float:
         return math.hypot(a[0] - b[0], a[1] - b[1])
+
+    @staticmethod
+    def _same_goal(a: Tuple[float, float, float], b: Tuple[float, float, float]) -> bool:
+        return (
+            abs(a[0] - b[0]) < 1e-3
+            and abs(a[1] - b[1]) < 1e-3
+            and abs(a[2] - b[2]) < 1e-3
+        )
 
 
 def main(args=None) -> None:
