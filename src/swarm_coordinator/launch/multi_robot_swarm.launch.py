@@ -24,7 +24,8 @@ def generate_launch_description() -> LaunchDescription:
     launch_dir = os.path.join(nav2_dir, 'launch')
     default_world = os.path.join(tb3_gazebo_dir, 'worlds', 'turtlebot3_world.world')
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
-    default_params = os.path.join(nav2_dir, 'params', 'nav2_multirobot_params_all.yaml')
+    # nav2_params.yaml avoids BT plugins that may be missing in some Humble installs.
+    default_params = os.path.join(nav2_dir, 'params', 'nav2_params.yaml')
     default_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
 
     robots = [
@@ -47,7 +48,7 @@ def generate_launch_description() -> LaunchDescription:
         'rviz_config', default_value=default_rviz, description='RViz config file'
     )
     declare_use_rviz = DeclareLaunchArgument(
-        'use_rviz', default_value='True', description='Start RViz for each robot namespace'
+        'use_rviz', default_value='True', description='Start a single RViz instance'
     )
     declare_autostart = DeclareLaunchArgument(
         'autostart', default_value='True', description='Autostart Nav2 lifecycle nodes'
@@ -58,10 +59,9 @@ def generate_launch_description() -> LaunchDescription:
         description='If true, followers keep updating from leader odometry',
     )
 
-    start_gazebo = ExecuteProcess(
+    start_gzserver = ExecuteProcess(
         cmd=[
-            'gazebo',
-            '--verbose',
+            'gzserver',
             '-s',
             'libgazebo_ros_init.so',
             '-s',
@@ -71,21 +71,17 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
     )
 
+    start_gzclient = ExecuteProcess(
+        cmd=['gzclient'],
+        output='screen',
+    )
+
     robot_actions = [LogInfo(msg=['number_of_robots=', str(len(robots))])]
     for robot in robots:
         robot_actions.append(
             GroupAction(
                 [
                     LogInfo(msg=['Launching namespace=', robot['name'], ' init_pose=', str(robot)]),
-                    IncludeLaunchDescription(
-                        PythonLaunchDescriptionSource(os.path.join(launch_dir, 'rviz_launch.py')),
-                        condition=IfCondition(LaunchConfiguration('use_rviz')),
-                        launch_arguments={
-                            'namespace': TextSubstitution(text=robot['name']),
-                            'use_namespace': 'True',
-                            'rviz_config': LaunchConfiguration('rviz_config'),
-                        }.items(),
-                    ),
                     IncludeLaunchDescription(
                         PythonLaunchDescriptionSource(
                             os.path.join(launch_dir, 'tb3_simulation_launch.py')
@@ -114,8 +110,20 @@ def generate_launch_description() -> LaunchDescription:
             )
         )
 
+    single_rviz = IncludeLaunchDescription(
+        PythonLaunchDescriptionSource(os.path.join(launch_dir, 'rviz_launch.py')),
+        condition=IfCondition(LaunchConfiguration('use_rviz')),
+        launch_arguments={
+            'namespace': TextSubstitution(text='robot1'),
+            'use_namespace': 'True',
+            'rviz_config': LaunchConfiguration('rviz_config'),
+        }.items(),
+    )
+
+    delayed_robot_bringup = TimerAction(period=5.0, actions=robot_actions)
+
     coordinator = TimerAction(
-        period=15.0,
+        period=25.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -147,8 +155,10 @@ def generate_launch_description() -> LaunchDescription:
             declare_use_rviz,
             declare_autostart,
             declare_dynamic_follow,
-            start_gazebo,
-            *robot_actions,
+            start_gzserver,
+            start_gzclient,
+            delayed_robot_bringup,
+            single_rviz,
             coordinator,
         ]
     )
