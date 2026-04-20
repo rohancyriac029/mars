@@ -20,7 +20,7 @@ class GoalCoordinator(Node):
         self.follower_ns = list(
             self.declare_parameter('follower_ns', ['robot2', 'robot3', 'robot4']).value
         )
-        self.leader_goal = list(self.declare_parameter('leader_goal', [1.0, 0.0, 0.0]).value)
+        self.leader_goal = list(self.declare_parameter('leader_goal', [1.5, 0.0, 0.0]).value)
         raw_dynamic_follow = self.declare_parameter('dynamic_follow', False).value
         if isinstance(raw_dynamic_follow, str):
             self.dynamic_follow = raw_dynamic_follow.lower() in ('1', 'true', 'yes', 'on')
@@ -37,17 +37,17 @@ class GoalCoordinator(Node):
 
         # Fixed offsets around the leader in map coordinates.
         self.offsets: Dict[str, Tuple[float, float]] = {
-            'robot2': (-1.0, 0.5),
-            'robot3': (-1.0, -0.5),
-            'robot4': (-2.0, 0.0),
+            'robot2': (0.0, -1.0),
+            'robot3': (0.0, 1.0),
+            'robot4': (-1.0, 0.0),
         }
 
         # Must match the spawn poses defined in the launch file.
         self.spawn_poses: Dict[str, Tuple[float, float, float]] = {
-            'robot1': (0.0, 0.0, 0.0),
-            'robot2': (-1.5, 0.0, 0.0),
-            'robot3': (1.5, 0.0, 0.0),
-            'robot4': (0.0, -1.5, 0.0),
+            'robot1': (-2.0, 0.0, 0.0),
+            'robot2': (-2.0, -1.0, 0.0),
+            'robot3': (-2.0, 1.0, 0.0),
+            'robot4': (-1.0, 0.0, 0.0),
         }
 
         self.robot_names = [self.leader_ns] + self.follower_ns

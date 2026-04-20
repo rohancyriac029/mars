@@ -11,10 +11,10 @@ class PoseInitializer(Node):
         super().__init__('pose_initializer')
 
         self.spawn_poses = {
-            'robot1': (0.0, 0.0, 0.0),
-            'robot2': (-1.5, 0.0, 0.0),
-            'robot3': (1.5, 0.0, 0.0),
-            'robot4': (0.0, -1.5, 0.0),
+            'robot1': (-2.0, 0.0, 0.0),
+            'robot2': (-2.0, -1.0, 0.0),
+            'robot3': (-2.0, 1.0, 0.0),
+            'robot4': (-1.0, 0.0, 0.0),
         }
 
         self.publishers = {}

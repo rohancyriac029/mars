@@ -44,10 +44,10 @@ def generate_launch_description() -> LaunchDescription:
     set_tb3_model = SetEnvironmentVariable('TURTLEBOT3_MODEL', LaunchConfiguration('tb3_model'))
 
     robots = [
-        {'name': 'robot1', 'x': 0.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot2', 'x': -1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot3', 'x': 1.5, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
-        {'name': 'robot4', 'x': 0.0, 'y': -1.5, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot1', 'x': -2.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot2', 'x': -2.0, 'y': -1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot3', 'x': -2.0, 'y': 1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot4', 'x': -1.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
     ]
 
     declare_world = DeclareLaunchArgument(
@@ -145,7 +145,7 @@ def generate_launch_description() -> LaunchDescription:
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
     pose_init = TimerAction(
-        period=20.0,
+        period=35.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -157,7 +157,7 @@ def generate_launch_description() -> LaunchDescription:
     )
 
     coordinator = TimerAction(
-        period=90.0,
+        period=120.0,
         actions=[
             Node(
                 package='swarm_coordinator',
@@ -168,7 +168,7 @@ def generate_launch_description() -> LaunchDescription:
                     {
                         'leader_ns': 'robot1',
                         'follower_ns': ['robot2', 'robot3', 'robot4'],
-                        'leader_goal': [1.0, 0.0, 0.0],
+                        'leader_goal': [1.5, 0.0, 0.0],
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
