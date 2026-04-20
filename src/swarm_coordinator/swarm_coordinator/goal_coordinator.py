@@ -48,11 +48,11 @@ class GoalCoordinator(Node):
         }
 
         self.robot_names = [self.leader_ns] + self.follower_ns
-        self.clients: Dict[str, ActionClient] = {}
+        self.nav_action_clients: Dict[str, ActionClient] = {}
         self.initial_pose_publishers = {}
 
         for ns in self.robot_names:
-            self.clients[ns] = ActionClient(self, NavigateToPose, f'/{ns}/navigate_to_pose')
+            self.nav_action_clients[ns] = ActionClient(self, NavigateToPose, f'/{ns}/navigate_to_pose')
             self.initial_pose_publishers[ns] = self.create_publisher(
                 PoseWithCovarianceStamped, f'/{ns}/initialpose', 10
             )
@@ -91,7 +91,10 @@ class GoalCoordinator(Node):
         if self.formation_sent:
             return
 
-        all_ready = all(client.wait_for_server(timeout_sec=0.0) for client in self.clients.values())
+        all_ready = all(
+            client.wait_for_server(timeout_sec=0.0)
+            for client in self.nav_action_clients.values()
+        )
         if not all_ready:
             if self.bootstrap_count % 5 == 0:
                 self.get_logger().info('Waiting for Nav2 action servers...')
@@ -155,7 +158,7 @@ class GoalCoordinator(Node):
         goal.pose.pose.position.z = 0.0
         goal.pose.pose.orientation = self._quat_from_yaw(yaw)
 
-        future = self.clients[robot_ns].send_goal_async(goal)
+        future = self.nav_action_clients[robot_ns].send_goal_async(goal)
         future.add_done_callback(lambda f, ns=robot_ns: self._goal_response_cb(ns, f))
 
     def _goal_response_cb(self, robot_ns: str, future) -> None:

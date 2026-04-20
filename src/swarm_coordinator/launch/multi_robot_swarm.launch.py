@@ -2,9 +2,17 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, TimerAction
+from launch.actions import (
+    DeclareLaunchArgument,
+    ExecuteProcess,
+    GroupAction,
+    IncludeLaunchDescription,
+    LogInfo,
+    TimerAction,
+)
+from launch.conditions import IfCondition
 from launch.launch_description_sources import PythonLaunchDescriptionSource
-from launch.substitutions import LaunchConfiguration
+from launch.substitutions import LaunchConfiguration, TextSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
 
@@ -13,18 +21,18 @@ def generate_launch_description() -> LaunchDescription:
     nav2_dir = get_package_share_directory('nav2_bringup')
     tb3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
 
-    cloned_multi_launch = os.path.join(nav2_dir, 'launch', 'cloned_multi_tb3_simulation_launch.py')
+    launch_dir = os.path.join(nav2_dir, 'launch')
     default_world = os.path.join(tb3_gazebo_dir, 'worlds', 'turtlebot3_world.world')
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
     default_params = os.path.join(nav2_dir, 'params', 'nav2_multirobot_params_all.yaml')
     default_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
 
-    default_robots = (
-        'robot1={x: 0.0, y: 0.0, yaw: 0.0}; '
-        'robot2={x: 0.0, y: -1.0, yaw: 0.0}; '
-        'robot3={x: 0.0, y: 1.0, yaw: 0.0}; '
-        'robot4={x: -1.0, y: 0.0, yaw: 0.0}'
-    )
+    robots = [
+        {'name': 'robot1', 'x': 0.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot2', 'x': 0.0, 'y': -1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot3', 'x': 0.0, 'y': 1.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+        {'name': 'robot4', 'x': -1.0, 'y': 0.0, 'z': 0.01, 'roll': 0.0, 'pitch': 0.0, 'yaw': 0.0},
+    ]
 
     declare_world = DeclareLaunchArgument(
         'world', default_value=default_world, description='Gazebo world file'
@@ -38,9 +46,6 @@ def generate_launch_description() -> LaunchDescription:
     declare_rviz_config = DeclareLaunchArgument(
         'rviz_config', default_value=default_rviz, description='RViz config file'
     )
-    declare_robots = DeclareLaunchArgument(
-        'robots', default_value=default_robots, description='Robot namespaces and spawn poses'
-    )
     declare_use_rviz = DeclareLaunchArgument(
         'use_rviz', default_value='True', description='Start RViz for each robot namespace'
     )
@@ -53,21 +58,61 @@ def generate_launch_description() -> LaunchDescription:
         description='If true, followers keep updating from leader odometry',
     )
 
-    simulation = IncludeLaunchDescription(
-        PythonLaunchDescriptionSource(cloned_multi_launch),
-        launch_arguments={
-            'world': LaunchConfiguration('world'),
-            'simulator': 'gazebo',
-            'map': LaunchConfiguration('map'),
-            'params_file': LaunchConfiguration('params_file'),
-            'autostart': LaunchConfiguration('autostart'),
-            'rviz_config': LaunchConfiguration('rviz_config'),
-            'use_rviz': LaunchConfiguration('use_rviz'),
-            'use_robot_state_pub': 'True',
-            'robots': LaunchConfiguration('robots'),
-            'log_settings': 'true',
-        }.items(),
+    start_gazebo = ExecuteProcess(
+        cmd=[
+            'gazebo',
+            '--verbose',
+            '-s',
+            'libgazebo_ros_init.so',
+            '-s',
+            'libgazebo_ros_factory.so',
+            LaunchConfiguration('world'),
+        ],
+        output='screen',
     )
+
+    robot_actions = [LogInfo(msg=['number_of_robots=', str(len(robots))])]
+    for robot in robots:
+        robot_actions.append(
+            GroupAction(
+                [
+                    LogInfo(msg=['Launching namespace=', robot['name'], ' init_pose=', str(robot)]),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(os.path.join(launch_dir, 'rviz_launch.py')),
+                        condition=IfCondition(LaunchConfiguration('use_rviz')),
+                        launch_arguments={
+                            'namespace': TextSubstitution(text=robot['name']),
+                            'use_namespace': 'True',
+                            'rviz_config': LaunchConfiguration('rviz_config'),
+                        }.items(),
+                    ),
+                    IncludeLaunchDescription(
+                        PythonLaunchDescriptionSource(
+                            os.path.join(launch_dir, 'tb3_simulation_launch.py')
+                        ),
+                        launch_arguments={
+                            'namespace': TextSubstitution(text=robot['name']),
+                            'use_namespace': 'True',
+                            'map': LaunchConfiguration('map'),
+                            'use_sim_time': 'True',
+                            'params_file': LaunchConfiguration('params_file'),
+                            'autostart': LaunchConfiguration('autostart'),
+                            'use_rviz': 'False',
+                            'use_simulator': 'False',
+                            'headless': 'False',
+                            'use_robot_state_pub': 'True',
+                            'x_pose': TextSubstitution(text=str(robot['x'])),
+                            'y_pose': TextSubstitution(text=str(robot['y'])),
+                            'z_pose': TextSubstitution(text=str(robot['z'])),
+                            'roll': TextSubstitution(text=str(robot['roll'])),
+                            'pitch': TextSubstitution(text=str(robot['pitch'])),
+                            'yaw': TextSubstitution(text=str(robot['yaw'])),
+                            'robot_name': TextSubstitution(text=robot['name']),
+                        }.items(),
+                    ),
+                ]
+            )
+        )
 
     coordinator = TimerAction(
         period=15.0,
@@ -99,11 +144,11 @@ def generate_launch_description() -> LaunchDescription:
             declare_map,
             declare_params_file,
             declare_rviz_config,
-            declare_robots,
             declare_use_rviz,
             declare_autostart,
             declare_dynamic_follow,
-            simulation,
+            start_gazebo,
+            *robot_actions,
             coordinator,
         ]
     )
