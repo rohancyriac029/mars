@@ -39,6 +39,19 @@ class GoalCoordinator(Node):
         self.goal_relay_position_tolerance = float(
             self.declare_parameter('goal_relay_position_tolerance', 0.15).value
         )
+        self.follower_trailing_offset = float(
+            self.declare_parameter('follower_trailing_offset', -0.30).value
+        )
+        self.follower_lateral_spacing = float(
+            self.declare_parameter('follower_lateral_spacing', 0.60).value
+        )
+        self.map_min_x = float(self.declare_parameter('map_min_x', -2.2).value)
+        self.map_max_x = float(self.declare_parameter('map_max_x', 2.2).value)
+        self.map_min_y = float(self.declare_parameter('map_min_y', -2.2).value)
+        self.map_max_y = float(self.declare_parameter('map_max_y', 2.2).value)
+        self.follower_goal_margin = float(
+            self.declare_parameter('follower_goal_margin', 0.25).value
+        )
         self.send_initial_pose = bool(self.declare_parameter('send_initial_pose', True).value)
         self.initial_pose_republish_count = int(
             self.declare_parameter('initial_pose_republish_count', 30).value
@@ -46,8 +59,8 @@ class GoalCoordinator(Node):
 
         # Fixed offsets around the leader in map coordinates.
         self.offsets: Dict[str, Tuple[float, float]] = {
-            'robot2': (0.0, -1.0),
-            'robot3': (0.0, 1.0),
+            'robot2': (self.follower_trailing_offset, -self.follower_lateral_spacing),
+            'robot3': (self.follower_trailing_offset, self.follower_lateral_spacing),
         }
 
         # Must match the spawn poses defined in the launch file.
@@ -94,6 +107,7 @@ class GoalCoordinator(Node):
 
         self.bootstrap_count = 0
         self.formation_sent = False
+        self.skip_bootstrap_leader_send = False
         self.bootstrap_timer = self.create_timer(1.0, self._bootstrap_step)
 
         self.get_logger().info(
@@ -138,7 +152,8 @@ class GoalCoordinator(Node):
     def _send_initial_formation(self) -> None:
         lx, ly, lyaw = self.leader_goal
 
-        self._send_formation_goal(lx, ly, lyaw, include_leader=True)
+        include_leader = not self.skip_bootstrap_leader_send
+        self._send_formation_goal(lx, ly, lyaw, include_leader=include_leader)
 
     def _leader_goal_cb(self, msg: PoseStamped) -> None:
         lx = float(msg.pose.position.x)
@@ -177,6 +192,9 @@ class GoalCoordinator(Node):
         self.leader_goal = [lx, ly, lyaw]
 
         if not self.formation_sent:
+            if source == 'leader_plan' and not include_leader:
+                # RViz Nav2 goal already commands robot1 directly; don't re-preempt on bootstrap.
+                self.skip_bootstrap_leader_send = True
             self.get_logger().info(
                 f'Queued leader goal from {source} before formation ready '
                 f'-> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
@@ -200,8 +218,7 @@ class GoalCoordinator(Node):
 
         for ns in self.follower_ns:
             dx, dy = self.offsets.get(ns, (0.0, 0.0))
-            gx = lx + dx
-            gy = ly + dy
+            gx, gy = self._bounded_follower_goal(lx + dx, ly + dy)
             self._send_nav_goal(ns, gx, gy, lyaw)
             self.last_follower_goals[ns] = (gx, gy, lyaw)
             self.get_logger().info(f'Follower goal: /{ns} -> ({gx:.2f}, {gy:.2f}, yaw={lyaw:.2f})')
@@ -222,8 +239,7 @@ class GoalCoordinator(Node):
 
         for ns in self.follower_ns:
             dx, dy = self.offsets.get(ns, (0.0, 0.0))
-            gx = lx + dx
-            gy = ly + dy
+            gx, gy = self._bounded_follower_goal(lx + dx, ly + dy)
             candidate = (gx, gy, lyaw)
 
             previous = self.last_follower_goals.get(ns)
@@ -232,6 +248,21 @@ class GoalCoordinator(Node):
 
             self._send_nav_goal(ns, gx, gy, lyaw)
             self.last_follower_goals[ns] = candidate
+
+    def _bounded_follower_goal(self, x: float, y: float) -> Tuple[float, float]:
+        min_x = self.map_min_x + self.follower_goal_margin
+        max_x = self.map_max_x - self.follower_goal_margin
+        min_y = self.map_min_y + self.follower_goal_margin
+        max_y = self.map_max_y - self.follower_goal_margin
+
+        bx = min(max(x, min_x), max_x)
+        by = min(max(y, min_y), max_y)
+
+        if abs(bx - x) > 1e-6 or abs(by - y) > 1e-6:
+            self.get_logger().warning(
+                f'Follower goal adjusted to map bounds: ({x:.2f}, {y:.2f}) -> ({bx:.2f}, {by:.2f})'
+            )
+        return bx, by
 
     def _send_nav_goal(self, robot_ns: str, x: float, y: float, yaw: float) -> None:
         goal = NavigateToPose.Goal()

@@ -179,6 +179,13 @@ def generate_launch_description() -> LaunchDescription:
                         'leader_ns': 'robot1',
                         'follower_ns': ['robot2', 'robot3'],
                         'leader_goal': [1.5, 0.0, 0.0],
+                        'follower_trailing_offset': -0.30,
+                        'follower_lateral_spacing': 0.60,
+                        'map_min_x': -2.2,
+                        'map_max_x': 2.2,
+                        'map_min_y': -2.2,
+                        'map_max_y': 2.2,
+                        'follower_goal_margin': 0.25,
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
