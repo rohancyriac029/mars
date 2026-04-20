@@ -31,6 +31,9 @@ class GoalCoordinator(Node):
             self.declare_parameter('goal_update_threshold', 0.30).value
         )
         self.send_initial_pose = bool(self.declare_parameter('send_initial_pose', True).value)
+        self.initial_pose_republish_count = int(
+            self.declare_parameter('initial_pose_republish_count', 30).value
+        )
 
         # Fixed offsets around the leader in map coordinates.
         self.offsets: Dict[str, Tuple[float, float]] = {
@@ -82,7 +85,7 @@ class GoalCoordinator(Node):
         self.bootstrap_count += 1
 
         # Publish initial pose a few times so AMCL receives it after startup.
-        if self.send_initial_pose and self.bootstrap_count <= 8:
+        if self.send_initial_pose and self.bootstrap_count <= self.initial_pose_republish_count:
             for ns in self.robot_names:
                 if ns in self.spawn_poses:
                     x, y, yaw = self.spawn_poses[ns]
@@ -219,6 +222,7 @@ class GoalCoordinator(Node):
 
 
 def main(args=None) -> None:
+    node = None
     rclpy.init(args=args)
     node = GoalCoordinator()
     try:
@@ -226,8 +230,13 @@ def main(args=None) -> None:
     except KeyboardInterrupt:
         pass
     finally:
-        node.destroy_node()
-        rclpy.shutdown()
+        if node is not None:
+            try:
+                node.destroy_node()
+            except Exception:
+                pass
+        if rclpy.ok():
+            rclpy.shutdown()
 
 
 if __name__ == '__main__':
