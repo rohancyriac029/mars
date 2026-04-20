@@ -30,6 +30,9 @@ class GoalCoordinator(Node):
         self.goal_update_threshold = float(
             self.declare_parameter('goal_update_threshold', 0.30).value
         )
+        self.leader_goal_topic = str(
+            self.declare_parameter('leader_goal_topic', f'/{self.leader_ns}/goal_pose').value
+        )
         self.send_initial_pose = bool(self.declare_parameter('send_initial_pose', True).value)
         self.initial_pose_republish_count = int(
             self.declare_parameter('initial_pose_republish_count', 30).value
@@ -70,6 +73,16 @@ class GoalCoordinator(Node):
         else:
             self.dynamic_timer = None
 
+        # Listen to Nav2 goal tool clicks and broadcast the formation goal.
+        self.leader_goal_sub = self.create_subscription(
+            PoseStamped, self.leader_goal_topic, self._leader_goal_cb, 10
+        )
+        self.global_goal_sub = None
+        if self.leader_goal_topic != '/goal_pose':
+            self.global_goal_sub = self.create_subscription(
+                PoseStamped, '/goal_pose', self._leader_goal_cb, 10
+            )
+
         self.bootstrap_count = 0
         self.formation_sent = False
         self.bootstrap_timer = self.create_timer(1.0, self._bootstrap_step)
@@ -78,6 +91,11 @@ class GoalCoordinator(Node):
             f'Coordinator ready. Leader=/{self.leader_ns}, followers={self.follower_ns}, '
             f'dynamic_follow={self.dynamic_follow}'
         )
+        self.get_logger().info(
+            f'Listening for leader goals on {self.leader_goal_topic}'
+        )
+        if self.global_goal_sub is not None:
+            self.get_logger().info('Also listening for leader goals on /goal_pose')
 
     def _bootstrap_step(self) -> None:
         self.bootstrap_count += 1
@@ -107,6 +125,25 @@ class GoalCoordinator(Node):
 
     def _send_initial_formation(self) -> None:
         lx, ly, lyaw = self.leader_goal
+
+        self._send_formation_goal(lx, ly, lyaw)
+
+    def _leader_goal_cb(self, msg: PoseStamped) -> None:
+        if not self.formation_sent:
+            self.get_logger().warning('Leader goal received but Nav2 servers are not ready yet.')
+            return
+
+        lx = float(msg.pose.position.x)
+        ly = float(msg.pose.position.y)
+        lyaw = self._yaw_from_quat(msg.pose.orientation)
+        self.leader_goal = [lx, ly, lyaw]
+
+        self.get_logger().info(
+            f'New leader goal from topic -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
+        )
+        self._send_formation_goal(lx, ly, lyaw)
+
+    def _send_formation_goal(self, lx: float, ly: float, lyaw: float) -> None:
 
         self._send_nav_goal(self.leader_ns, lx, ly, lyaw)
         self.get_logger().info(
