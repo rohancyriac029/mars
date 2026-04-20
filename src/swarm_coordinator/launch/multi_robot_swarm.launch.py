@@ -144,6 +144,18 @@ def generate_launch_description() -> LaunchDescription:
 
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
+    pose_init = TimerAction(
+        period=20.0,
+        actions=[
+            Node(
+                package='swarm_coordinator',
+                executable='pose_initializer',
+                name='pose_initializer',
+                output='screen',
+            )
+        ],
+    )
+
     coordinator = TimerAction(
         period=90.0,
         actions=[
@@ -161,7 +173,7 @@ def generate_launch_description() -> LaunchDescription:
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
                         'replan_period': 2.0,
-                        'send_initial_pose': True,
+                        'send_initial_pose': False,
                     }
                 ],
             )
@@ -182,6 +194,7 @@ def generate_launch_description() -> LaunchDescription:
             declare_dynamic_follow,
             delayed_robot_bringup,
             single_rviz,
+            pose_init,
             coordinator,
         ]
     )

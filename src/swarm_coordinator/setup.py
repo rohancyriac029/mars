@@ -21,6 +21,7 @@ setup(
     entry_points={
         'console_scripts': [
             'goal_coordinator = swarm_coordinator.goal_coordinator:main',
+            'pose_initializer = swarm_coordinator.pose_initializer:main',
         ],
     },
 )

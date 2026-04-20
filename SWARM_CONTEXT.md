@@ -23,7 +23,7 @@ Build a minimal and robust multi-robot system in Gazebo + Nav2 where:
 3. Publish a leader goal and deterministic follower offsets.
 4. Optionally replan follower goals using leader odometry.
 5. Delay coordinator start until Nav2 action servers are likely available.
-6. Republish initial poses multiple times to improve AMCL startup stability.
+6. Publish initial poses early from a dedicated node to improve AMCL startup stability.
 
 ---
 
@@ -38,6 +38,7 @@ mars/
       swarm_coordinator/
         __init__.py
         goal_coordinator.py
+                pose_initializer.py
       resource/
         swarm_coordinator
       package.xml
@@ -104,6 +105,7 @@ setup(
     entry_points={
         'console_scripts': [
             'goal_coordinator = swarm_coordinator.goal_coordinator:main',
+            'pose_initializer = swarm_coordinator.pose_initializer:main',
         ],
     },
 )
@@ -276,6 +278,18 @@ def generate_launch_description() -> LaunchDescription:
 
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
+    pose_init = TimerAction(
+        period=20.0,
+        actions=[
+            Node(
+                package='swarm_coordinator',
+                executable='pose_initializer',
+                name='pose_initializer',
+                output='screen',
+            )
+        ],
+    )
+
     coordinator = TimerAction(
         period=90.0,
         actions=[
@@ -293,7 +307,7 @@ def generate_launch_description() -> LaunchDescription:
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),
                         'replan_period': 2.0,
-                        'send_initial_pose': True,
+                        'send_initial_pose': False,
                     }
                 ],
             )
@@ -314,6 +328,7 @@ def generate_launch_description() -> LaunchDescription:
             declare_dynamic_follow,
             delayed_robot_bringup,
             single_rviz,
+            pose_init,
             coordinator,
         ]
     )
@@ -566,6 +581,85 @@ if __name__ == '__main__':
     main()
 ```
 
+### `src/swarm_coordinator/swarm_coordinator/pose_initializer.py`
+```python
+#!/usr/bin/env python3
+import math
+
+import rclpy
+from geometry_msgs.msg import PoseWithCovarianceStamped, Quaternion
+from rclpy.node import Node
+
+
+class PoseInitializer(Node):
+    def __init__(self) -> None:
+        super().__init__('pose_initializer')
+
+        self.spawn_poses = {
+            'robot1': (0.0, 0.0, 0.0),
+            'robot2': (-1.5, 0.0, 0.0),
+            'robot3': (1.5, 0.0, 0.0),
+            'robot4': (0.0, -1.5, 0.0),
+        }
+
+        self.publishers = {}
+        for ns in self.spawn_poses:
+            self.publishers[ns] = self.create_publisher(
+                PoseWithCovarianceStamped, f'/{ns}/initialpose', 10
+            )
+
+        self.count = 0
+        self.timer = self.create_timer(1.0, self._publish)
+        self.get_logger().info('PoseInitializer started: publishing initial poses...')
+
+    def _publish(self) -> None:
+        self.count += 1
+        for ns, (x, y, yaw) in self.spawn_poses.items():
+            msg = PoseWithCovarianceStamped()
+            msg.header.frame_id = 'map'
+            msg.header.stamp = self.get_clock().now().to_msg()
+
+            msg.pose.pose.position.x = x
+            msg.pose.pose.position.y = y
+            msg.pose.pose.orientation = self._quat(yaw)
+
+            msg.pose.covariance[0] = 0.25
+            msg.pose.covariance[7] = 0.25
+            msg.pose.covariance[35] = 0.07
+            self.publishers[ns].publish(msg)
+
+        if self.count % 5 == 0:
+            self.get_logger().info(f'Published initial poses x{self.count}')
+
+        if self.count >= 40:
+            self.get_logger().info('Done publishing initial poses.')
+            self.timer.cancel()
+
+    @staticmethod
+    def _quat(yaw: float) -> Quaternion:
+        q = Quaternion()
+        q.z = math.sin(yaw * 0.5)
+        q.w = math.cos(yaw * 0.5)
+        return q
+
+
+def main(args=None) -> None:
+    rclpy.init(args=args)
+    node = PoseInitializer()
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        pass
+    finally:
+        node.destroy_node()
+        if rclpy.ok():
+            rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
+```
+
 ---
 
 ## 5) Commands (Recommended)
@@ -680,6 +774,21 @@ Fix:
 
 ---
 
+### Error G: AMCL did not receive initial pose early
+Observed:
+- `AMCL cannot publish a pose or update the transform. Please set the initial pose...`
+- `base_link -> map transform does not exist`
+
+Root cause:
+- Initial pose publishing was tied to `goal_coordinator`, which starts much later than AMCL startup.
+
+Fixes applied:
+- Added dedicated `pose_initializer` node.
+- Launched `pose_initializer` early at `20s` after robot bringup begins.
+- Set coordinator parameter `send_initial_pose` to `False` so only early pose init handles AMCL seeding.
+
+---
+
 ## 7) Quick Runtime Validation Checklist
 
 1. Verify robot count in launch log:
@@ -706,6 +815,11 @@ ros2 topic echo /robot1/odom --once
 ros2 action list | grep navigate_to_pose
 ```
 
+6. Verify map-to-base transform resolves:
+```bash
+ros2 run tf2_ros tf2_echo map robot1/base_link
+```
+
 ---
 
 ## 8) Notes
@@ -727,6 +841,7 @@ These updates were applied to improve full UI behavior on Ubuntu desktop (Gazebo
      - fallback to `nav2_default_view.rviz` if missing
 3. Increased coordinator delayed start from `35.0` to `90.0` seconds for slower machines.
 4. Kept one RViz instance and staggered robot startup.
+5. Added early `pose_initializer` launch at `20s` and set coordinator `send_initial_pose=False`.
 
 ### Critical CLI pitfall (causes `number_of_robots=0`)
 
@@ -768,6 +883,7 @@ ros2 topic echo /gazebo/model_states --once
 If this markdown and code ever differ, use workspace code as source of truth:
 - `src/swarm_coordinator/launch/multi_robot_swarm.launch.py`
 - `src/swarm_coordinator/swarm_coordinator/goal_coordinator.py`
+- `src/swarm_coordinator/swarm_coordinator/pose_initializer.py`
 
 ---
 
