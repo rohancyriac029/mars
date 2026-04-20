@@ -75,8 +75,8 @@ def generate_launch_description() -> LaunchDescription:
         },
         {
             'name': 'robot4',
-            'x': -1.0,
-            'y': -1.5,
+            'x': -2.0,
+            'y': 2.0,
             'z': 0.01,
             'roll': 0.0,
             'pitch': 0.0,
@@ -113,7 +113,7 @@ def generate_launch_description() -> LaunchDescription:
     for idx, robot in enumerate(robots):
         use_simulator = 'True' if idx == 0 else 'False'
         headless = 'False' if idx == 0 else 'True'
-        start_delay = float(idx * 8)
+        start_delay = float(idx * 10)
 
         robot_actions.append(
             TimerAction(
@@ -169,8 +169,10 @@ def generate_launch_description() -> LaunchDescription:
             'namespace': TextSubstitution(text='robot1'),
             'use_namespace': 'True',
             'rviz_config': LaunchConfiguration('rviz_config'),
+            'use_sim_time': 'True',
         }.items(),
     )
+    delayed_rviz = TimerAction(period=45.0, actions=[single_rviz])
 
     delayed_robot_bringup = TimerAction(period=2.0, actions=robot_actions)
 
@@ -210,7 +212,7 @@ def generate_launch_description() -> LaunchDescription:
             declare_autostart,
             declare_dynamic_follow,
             delayed_robot_bringup,
-            single_rviz,
+            delayed_rviz,
             coordinator,
         ]
     )

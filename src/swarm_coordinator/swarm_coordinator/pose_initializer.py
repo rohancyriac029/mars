@@ -14,7 +14,7 @@ class PoseInitializer(Node):
             'robot1': (-2.0, 0.0, 0.0),
             'robot2': (-2.0, -1.0, 0.0),
             'robot3': (-2.0, 1.0, 0.0),
-            'robot4': (-1.0, -1.5, 0.0),
+            'robot4': (-2.0, 2.0, 0.0),
         }
 
         self.publishers = {}

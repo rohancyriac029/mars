@@ -23,7 +23,7 @@ Build a minimal and robust multi-robot system in Gazebo + Nav2 where:
 3. Publish a leader goal and deterministic follower offsets.
 4. Optionally replan follower goals using leader odometry.
 5. Delay coordinator start until Nav2 action servers are likely available.
-6. Publish initial poses early from a dedicated node to improve AMCL startup stability.
+6. Configure AMCL set_initial_pose per robot in Nav2 params to avoid startup timing races.
 
 ---
 
@@ -35,6 +35,11 @@ mars/
     swarm_coordinator/
       launch/
         multi_robot_swarm.launch.py
+            config/
+                nav2_params_robot1.yaml
+                nav2_params_robot2.yaml
+                nav2_params_robot3.yaml
+                nav2_params_robot4.yaml
       swarm_coordinator/
         __init__.py
         goal_coordinator.py
@@ -94,6 +99,15 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
         ('share/' + package_name + '/launch', ['launch/multi_robot_swarm.launch.py']),
+        (
+            'share/' + package_name + '/config',
+            [
+                'config/nav2_params_robot1.yaml',
+                'config/nav2_params_robot2.yaml',
+                'config/nav2_params_robot3.yaml',
+                'config/nav2_params_robot4.yaml',
+            ],
+        ),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
@@ -154,12 +168,11 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description() -> LaunchDescription:
     nav2_dir = get_package_share_directory('nav2_bringup')
     tb3_gazebo_dir = get_package_share_directory('turtlebot3_gazebo')
+    swarm_dir = get_package_share_directory('swarm_coordinator')
 
     launch_dir = os.path.join(nav2_dir, 'launch')
     default_world = os.path.join(tb3_gazebo_dir, 'worlds', 'turtlebot3_world.world')
     default_map = os.path.join(nav2_dir, 'maps', 'turtlebot3_world.yaml')
-    # nav2_params.yaml avoids BT plugins that may be missing in some Humble installs.
-    default_params = os.path.join(nav2_dir, 'params', 'nav2_params.yaml')
     namespaced_rviz = os.path.join(nav2_dir, 'rviz', 'nav2_namespaced_view.rviz')
     default_rviz = (
         namespaced_rviz
