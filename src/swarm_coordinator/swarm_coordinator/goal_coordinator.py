@@ -5,7 +5,7 @@ from typing import Dict, Optional, Tuple
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Quaternion
 from nav2_msgs.action import NavigateToPose
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import Odometry, Path
 from rclpy.action import ActionClient
 from rclpy.node import Node
 
@@ -32,6 +32,12 @@ class GoalCoordinator(Node):
         )
         self.leader_goal_topic = str(
             self.declare_parameter('leader_goal_topic', f'/{self.leader_ns}/goal_pose').value
+        )
+        self.leader_plan_topic = str(
+            self.declare_parameter('leader_plan_topic', f'/{self.leader_ns}/plan').value
+        )
+        self.goal_relay_position_tolerance = float(
+            self.declare_parameter('goal_relay_position_tolerance', 0.15).value
         )
         self.send_initial_pose = bool(self.declare_parameter('send_initial_pose', True).value)
         self.initial_pose_republish_count = int(
@@ -77,6 +83,9 @@ class GoalCoordinator(Node):
         self.leader_goal_sub = self.create_subscription(
             PoseStamped, self.leader_goal_topic, self._leader_goal_cb, 10
         )
+        self.leader_plan_sub = self.create_subscription(
+            Path, self.leader_plan_topic, self._leader_plan_cb, 10
+        )
         self.global_goal_sub = None
         if self.leader_goal_topic != '/goal_pose':
             self.global_goal_sub = self.create_subscription(
@@ -93,6 +102,9 @@ class GoalCoordinator(Node):
         )
         self.get_logger().info(
             f'Listening for leader goals on {self.leader_goal_topic}'
+        )
+        self.get_logger().info(
+            f'Listening for leader plans on {self.leader_plan_topic}'
         )
         if self.global_goal_sub is not None:
             self.get_logger().info('Also listening for leader goals on /goal_pose')
@@ -126,29 +138,65 @@ class GoalCoordinator(Node):
     def _send_initial_formation(self) -> None:
         lx, ly, lyaw = self.leader_goal
 
-        self._send_formation_goal(lx, ly, lyaw)
+        self._send_formation_goal(lx, ly, lyaw, include_leader=True)
 
     def _leader_goal_cb(self, msg: PoseStamped) -> None:
-        if not self.formation_sent:
-            self.get_logger().warning('Leader goal received but Nav2 servers are not ready yet.')
-            return
-
         lx = float(msg.pose.position.x)
         ly = float(msg.pose.position.y)
         lyaw = self._yaw_from_quat(msg.pose.orientation)
+        self._relay_formation_if_new_goal(
+            lx, ly, lyaw, source='goal_topic', include_leader=True
+        )
+
+    def _leader_plan_cb(self, msg: Path) -> None:
+        # Nav2 Goal in RViz uses actions directly; infer new leader goals from plan endpoint.
+        if not msg.poses:
+            return
+
+        goal_pose = msg.poses[-1].pose
+        lx = float(goal_pose.position.x)
+        ly = float(goal_pose.position.y)
+        lyaw = self._yaw_from_quat(goal_pose.orientation)
+        self._relay_formation_if_new_goal(
+            lx, ly, lyaw, source='leader_plan', include_leader=False
+        )
+
+    def _relay_formation_if_new_goal(
+        self,
+        lx: float,
+        ly: float,
+        lyaw: float,
+        source: str,
+        include_leader: bool,
+    ) -> None:
+        previous = (self.leader_goal[0], self.leader_goal[1], self.leader_goal[2])
+        candidate = (lx, ly, lyaw)
+        if self._pose_delta(previous, candidate) < self.goal_relay_position_tolerance:
+            return
+
         self.leader_goal = [lx, ly, lyaw]
 
-        self.get_logger().info(
-            f'New leader goal from topic -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
-        )
-        self._send_formation_goal(lx, ly, lyaw)
+        if not self.formation_sent:
+            self.get_logger().info(
+                f'Queued leader goal from {source} before formation ready '
+                f'-> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
+            )
+            return
 
-    def _send_formation_goal(self, lx: float, ly: float, lyaw: float) -> None:
-
-        self._send_nav_goal(self.leader_ns, lx, ly, lyaw)
         self.get_logger().info(
-            f'Leader goal: /{self.leader_ns} -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
+            f'New leader goal from {source} -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
         )
+        self._send_formation_goal(lx, ly, lyaw, include_leader=include_leader)
+
+    def _send_formation_goal(
+        self, lx: float, ly: float, lyaw: float, include_leader: bool
+    ) -> None:
+
+        if include_leader:
+            self._send_nav_goal(self.leader_ns, lx, ly, lyaw)
+            self.get_logger().info(
+                f'Leader goal: /{self.leader_ns} -> ({lx:.2f}, {ly:.2f}, yaw={lyaw:.2f})'
+            )
 
         for ns in self.follower_ns:
             dx, dy = self.offsets.get(ns, (0.0, 0.0))
