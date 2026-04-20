@@ -73,16 +73,6 @@ def generate_launch_description() -> LaunchDescription:
             'yaw': 0.0,
             'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot3.yaml'),
         },
-        {
-            'name': 'robot4',
-            'x': -2.0,
-            'y': 2.0,
-            'z': 0.01,
-            'roll': 0.0,
-            'pitch': 0.0,
-            'yaw': 0.0,
-            'params': os.path.join(swarm_dir, 'config', 'nav2_params_robot4.yaml'),
-        },
     ]
 
     declare_world = DeclareLaunchArgument(
@@ -187,7 +177,7 @@ def generate_launch_description() -> LaunchDescription:
                 parameters=[
                     {
                         'leader_ns': 'robot1',
-                        'follower_ns': ['robot2', 'robot3', 'robot4'],
+                        'follower_ns': ['robot2', 'robot3'],
                         'leader_goal': [1.5, 0.0, 0.0],
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool

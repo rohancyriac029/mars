@@ -16,7 +16,6 @@ setup(
                 'config/nav2_params_robot1.yaml',
                 'config/nav2_params_robot2.yaml',
                 'config/nav2_params_robot3.yaml',
-                'config/nav2_params_robot4.yaml',
             ],
         ),
     ],
