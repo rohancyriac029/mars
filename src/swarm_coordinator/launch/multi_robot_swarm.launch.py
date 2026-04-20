@@ -186,8 +186,8 @@ def generate_launch_description() -> LaunchDescription:
                         'map_min_y': -2.2,
                         'map_max_y': 2.2,
                         'follower_goal_margin': 0.25,
-                        'follower_failure_relax_step': 0.40,
-                        'follower_max_retries': 3,
+                        'follower_failure_relax_step': 0.30,
+                        'follower_max_retries': 5,
                         'dynamic_follow': ParameterValue(
                             LaunchConfiguration('dynamic_follow'), value_type=bool
                         ),

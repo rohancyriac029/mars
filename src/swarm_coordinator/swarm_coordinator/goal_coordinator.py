@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import math
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Set, Tuple
 
 import rclpy
 from geometry_msgs.msg import PoseStamped, PoseWithCovarianceStamped, Quaternion
@@ -82,6 +82,7 @@ class GoalCoordinator(Node):
         self.latest_commanded_goal: Dict[str, Tuple[float, float, float]] = {}
         self.active_formation_goal: Optional[Tuple[float, float, float]] = None
         self.follower_retry_count: Dict[str, int] = {}
+        self.follower_attempted_goal_keys: Dict[str, Set[str]] = {}
 
         for ns in self.robot_names:
             self.nav_action_clients[ns] = ActionClient(self, NavigateToPose, f'/{ns}/navigate_to_pose')
@@ -220,6 +221,7 @@ class GoalCoordinator(Node):
     def _begin_formation_cycle(self, lx: float, ly: float, lyaw: float) -> None:
         self.active_formation_goal = (lx, ly, lyaw)
         self.follower_retry_count = {ns: 0 for ns in self.follower_ns}
+        self.follower_attempted_goal_keys = {ns: set() for ns in self.follower_ns}
 
     def _send_formation_goal(
         self, lx: float, ly: float, lyaw: float, include_leader: bool
@@ -282,6 +284,8 @@ class GoalCoordinator(Node):
     def _send_nav_goal(self, robot_ns: str, x: float, y: float, yaw: float) -> None:
         commanded_goal = (x, y, yaw)
         self.latest_commanded_goal[robot_ns] = commanded_goal
+        if robot_ns in self.follower_attempted_goal_keys:
+            self.follower_attempted_goal_keys[robot_ns].add(self._goal_key(x, y, yaw))
 
         goal = NavigateToPose.Goal()
         goal.pose = PoseStamped()
@@ -323,8 +327,8 @@ class GoalCoordinator(Node):
             status = future.result().status
             self.get_logger().info(f'/{robot_ns} goal finished with status={status}')
 
-            # If follower planning fails, progressively relax its offset toward the leader goal.
-            if status != 4 and robot_ns in self.follower_ns and not self.dynamic_follow:
+            # Retry only on aborted follower goals in non-dynamic mode.
+            if status == 6 and robot_ns in self.follower_ns and not self.dynamic_follow:
                 self._retry_follower_goal(robot_ns)
         except Exception as exc:
             self.get_logger().error(f'Error while getting result from /{robot_ns}: {exc}')
@@ -340,18 +344,42 @@ class GoalCoordinator(Node):
             )
             return
 
-        self.follower_retry_count[robot_ns] = retries + 1
-
         lx, ly, lyaw = self.active_formation_goal
         base_dx, base_dy = self.offsets.get(robot_ns, (0.0, 0.0))
-        scale = max(0.0, 1.0 - self.follower_failure_relax_step * (retries + 1))
-        retry_dx = base_dx * scale
-        retry_dy = base_dy * scale
 
-        gx, gy = self._bounded_follower_goal(lx + retry_dx, ly + retry_dy)
+        attempted = self.follower_attempted_goal_keys.get(robot_ns, set())
+        next_retry_index = retries + 1
+
+        # Try multiple distinct alternatives so retries don't repeat the same clamped point.
+        scale = max(0.0, 1.0 - self.follower_failure_relax_step * next_retry_index)
+        candidate_offsets = [
+            (base_dx * scale, base_dy * scale),
+            (base_dx * scale, -base_dy * scale),
+            (base_dx * 0.5, base_dy * 0.5),
+            (base_dx * 0.5, -base_dy * 0.5),
+            (base_dx * 0.25, 0.0),
+            (0.0, 0.0),
+        ]
+
+        selected_goal: Optional[Tuple[float, float]] = None
+        for dx, dy in candidate_offsets:
+            gx, gy = self._bounded_follower_goal(lx + dx, ly + dy)
+            if self._goal_key(gx, gy, lyaw) in attempted:
+                continue
+            selected_goal = (gx, gy)
+            break
+
+        if selected_goal is None:
+            self.get_logger().warning(
+                f'/{robot_ns} has no new retry candidate; keeping last command.'
+            )
+            return
+
+        self.follower_retry_count[robot_ns] = next_retry_index
+        gx, gy = selected_goal
         self.get_logger().warning(
             f'Retrying /{robot_ns} with relaxed goal '
-            f'({retries + 1}/{self.follower_max_retries}) -> ({gx:.2f}, {gy:.2f}, yaw={lyaw:.2f})'
+            f'({next_retry_index}/{self.follower_max_retries}) -> ({gx:.2f}, {gy:.2f}, yaw={lyaw:.2f})'
         )
         self._send_nav_goal(robot_ns, gx, gy, lyaw)
         self.last_follower_goals[robot_ns] = (gx, gy, lyaw)
@@ -398,6 +426,10 @@ class GoalCoordinator(Node):
             and abs(a[1] - b[1]) < 1e-3
             and abs(a[2] - b[2]) < 1e-3
         )
+
+    @staticmethod
+    def _goal_key(x: float, y: float, yaw: float) -> str:
+        return f'{x:.2f},{y:.2f},{yaw:.2f}'
 
 
 def main(args=None) -> None:
